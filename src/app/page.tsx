@@ -16,32 +16,61 @@ export default function Home() {
   
   const [post, setPost] = useState<GeneratedPost | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url || !topic) return;
     
-    // Start Mock Flow
     setStep('crawling');
     
-    setTimeout(() => {
+    try {
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, topic })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate content');
+      }
+
       setStep('generating');
+      const data = await response.json();
       
-      setTimeout(() => {
-        setPost({
-          text: `🚀 [TRENDING] The future of ${topic || 'Technology'} is here!\n\nWe just analyzed top metrics from ${url || 'the fanpage'} and noticed a massive shift in how audiences engage. The secret? Authenticity and speed.\n\nHere are 3 tips to stay ahead:\n1. Adapt quickly ⚡\n2. Listen closely 🎧\n3. Engage daily 💬\n\nWhat are your thoughts on this? Drop a comment below! 👇\n\n#${(topic || 'Tech').replace(/ /g, '')} #Trends #Innovation`,
-          imageUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=800&auto=format&fit=crop'
-        });
-        setStep('review');
-      }, 3000);
+      setPost({
+        text: data.text,
+        imageUrl: data.imageUrl
+      });
       
-    }, 2500);
+      setStep('review');
+    } catch (error) {
+      console.error(error);
+      alert('Error generating content. Please check API keys.');
+      setStep('idle');
+    }
   };
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
+    if (!post) return;
     setStep('publishing');
-    setTimeout(() => {
+    
+    try {
+      const response = await fetch('/api/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: post.text, imageUrl: post.imageUrl })
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to publish');
+      }
+
       setStep('success');
-    }, 2000);
+    } catch (error: any) {
+      console.error(error);
+      alert('Error publishing to Facebook: ' + error.message);
+      setStep('review');
+    }
   };
 
   const handleReset = () => {

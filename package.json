@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "apify-client": "^2.22.2",
+    "axios": "^1.13.6",
     "next": "16.1.7",
     "react": "19.2.3",
     "react-dom": "19.2.3"
