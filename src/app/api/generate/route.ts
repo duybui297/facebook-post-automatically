@@ -50,9 +50,13 @@ export async function POST(req: Request) {
     `;
 
     const responseText = await callPollinationsText(prompt);
-    console.log('[Pollinations Response]:', responseText);
+    console.log('[Generate Output]:', responseText);
     
-    // Clean up markdown code fences from Gemini
+    if (!responseText || responseText.length < 5) {
+      throw new Error('AI returned an empty or too short response. Please try again.');
+    }
+
+    // Clean up markdown code fences
     const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     
     let generatedObject = { postText: '', imagePrompt: topic };
@@ -66,25 +70,29 @@ export async function POST(req: Request) {
       if (postMatch?.[1]) {
         generatedObject.postText = postMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
       } else {
-        generatedObject.postText = cleanedText.replace(/[{}]/g, '').trim();
+        // Fallback: If no JSON structure, use the whole text but strip outer braces
+        generatedObject.postText = cleanedText.replace(/^{|}$/g, '').trim();
       }
       if (imgMatch?.[1]) generatedObject.imagePrompt = imgMatch[1];
     }
-    // Final sanity check: Ensure postText is a string
-    if (typeof generatedObject.postText !== 'string') {
-      generatedObject.postText = String(generatedObject.postText || '');
+    
+    // Final sanity check: Ensure postText is a non-null string
+    let finalPostText = generatedObject.postText;
+    if (!finalPostText || typeof finalPostText !== 'string' || finalPostText === 'null') {
+      // If still empty/null, use the cleaned whole text as a last resort
+      finalPostText = cleanedText || 'No content generated.';
     }
 
     // Safety: strip any stray markdown asterisks
-    generatedObject.postText = generatedObject.postText.replace(/\*\*/g, '').replace(/\*/g, '');
+    finalPostText = finalPostText.replace(/\*\*/g, '').replace(/\*/g, '');
 
-    // Trim the image prompt so it's not excessively long
-    let imagePrompt = (generatedObject.imagePrompt || topic);
-    if (imagePrompt.length > 250) imagePrompt = imagePrompt.substring(0, 250);
+    // Trim the image prompt
+    let finalImagePrompt = (generatedObject.imagePrompt || topic);
+    if (finalImagePrompt.length > 250) finalImagePrompt = finalImagePrompt.substring(0, 250);
 
     return NextResponse.json({
-      text: generatedObject.postText,
-      imagePrompt: imagePrompt
+      text: finalPostText,
+      imagePrompt: finalImagePrompt
     });
 
   } catch (error: any) {

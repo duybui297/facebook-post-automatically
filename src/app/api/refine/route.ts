@@ -33,6 +33,29 @@ export async function POST(req: Request) {
     `;
 
     let revisedText = await callPollinationsText(prompt);
+    console.log('[Refine Output]:', revisedText);
+
+    if (!revisedText || revisedText.length < 5) {
+      throw new Error('AI returned an empty response. Please try again.');
+    }
+
+    // Attempt to remove AI commentary if present (e.g. "Here is your revised post...")
+    // We look for text between quotes if present, or just use the last part if it looks like a preamble
+    if (revisedText.includes('---')) {
+      const parts = revisedText.split('---');
+      revisedText = parts[parts.length - 1].trim();
+    } else if (revisedText.includes('\n\n')) {
+      // If there are multiple paragraphs and the first one is short, it might be a preamble
+      const lines = revisedText.split('\n');
+      if (lines[0].length < 100 && lines.length > 2) {
+        // Very simple heuristic: skip the first line if it looks like a preamble
+        if (lines[0].toLowerCase().includes('here is') || lines[0].toLowerCase().includes('revised')) {
+          revisedText = lines.slice(1).join('\n').trim();
+        }
+      }
+    }
+
+    // Safety strip of any markdown
     revisedText = revisedText.replace(/\*\*/g, '').replace(/\*/g, '').trim();
 
     return NextResponse.json({ revisedText });
