@@ -18,6 +18,10 @@ interface HistoryEntry {
   timestamp: string;
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown error';
+}
+
 export default function Home() {
   const [pages, setPages] = useState<FanpageConfig[]>([]);
   const [selectedPageId, setSelectedPageId] = useState('');
@@ -165,8 +169,8 @@ export default function Home() {
         content: data.revisedText,
         timestamp: new Date().toLocaleTimeString()
       }]);
-    } catch (error: any) {
-      alert('Error refining text: ' + error.message);
+    } catch (error) {
+      alert('Error refining text: ' + getErrorMessage(error));
     } finally {
       setIsRefining(false);
     }
@@ -195,8 +199,8 @@ export default function Home() {
         throw new Error(err.error || 'Failed to publish');
       }
       setStep('success');
-    } catch (error: any) {
-      alert('Error publishing to Facebook: ' + error.message);
+    } catch (error) {
+      alert('Error publishing to Facebook: ' + getErrorMessage(error));
       setStep('review');
     }
   };

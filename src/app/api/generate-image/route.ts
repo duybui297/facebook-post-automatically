@@ -1,17 +1,48 @@
 import { NextResponse } from 'next/server';
 
-// Helper: extract 1-3 clean keywords from a long image prompt or topic
-function extractKeywords(prompt: string, topic?: string): string {
-  // Prioritize topic if provided, as it's the most concise user intent
-  const source = topic || prompt;
-  // Take first few meaningful words (skip stop words)
-  const stopWords = new Set(['a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'for', 'with', 'about', 'is', 'are', 'was', 'be', 'been', 'that', 'this', 'from', 'by', 'as', 'it', 'its']);
-  const words = source
-    .replace(/[^a-zA-Z\s]/g, ' ')
+const STOP_WORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'for', 'with', 'about',
+  'is', 'are', 'was', 'be', 'been', 'that', 'this', 'from', 'by', 'as', 'it', 'its',
+  'show', 'create', 'square', 'image', 'thumbnail', 'realistic', 'bold', 'style', 'mood',
+  'lighting', 'facebook', 'cover', 'photo', 'visual', 'scene'
+]);
+
+function extractKeywords(text: string, limit: number): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/gi, ' ')
     .split(/\s+/)
-    .filter(w => w.length > 2 && !stopWords.has(w.toLowerCase()))
-    .slice(0, 4);
-  return words.join(',') || 'nature';
+    .filter(word => word.length > 2 && !STOP_WORDS.has(word))
+    .filter((word, index, words) => words.indexOf(word) === index)
+    .slice(0, limit);
+}
+
+function buildSearchQuery(prompt: string, topic: string, customPrompt: string): string {
+  const topicKeywords = extractKeywords(topic, 4);
+  const detailKeywords = extractKeywords(customPrompt || prompt, 4).filter(
+    keyword => !topicKeywords.includes(keyword)
+  );
+
+  return [...topicKeywords, ...detailKeywords].slice(0, 6).join(',');
+}
+
+function buildGenerationPrompt(prompt: string, topic: string, customPrompt: string): string {
+  const baseTopic = topic.trim() || 'the requested topic';
+  const descriptivePrompt = (customPrompt || prompt).trim();
+
+  return [
+    `Create a square social media image that clearly matches the topic "${baseTopic}".`,
+    descriptivePrompt ? `Visual direction: ${descriptivePrompt}.` : '',
+    'Keep the main subject, setting, and mood aligned with the topic.',
+    'Make it bold, clean, realistic, and eye-catching for Facebook.',
+    'Do not add text overlays, logos, watermarks, collages, or unrelated objects.'
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export async function POST(req: Request) {
@@ -38,7 +69,7 @@ export async function POST(req: Request) {
   try {
     const { GoogleGenAI } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-    const finalPrompt = customPrompt || prompt;
+    const finalPrompt = buildGenerationPrompt(prompt, topic, customPrompt);
 
     const response = await ai.models.generateImages({
       model: 'imagen-3.0-generate-002',
@@ -51,16 +82,13 @@ export async function POST(req: Request) {
 
     console.log('Imagen 3 success!');
     return NextResponse.json({ imageUrl: `data:image/jpeg;base64,${imageBytes}`, source: 'imagen3' });
-  } catch (imagenError: any) {
-    console.warn('Imagen 3 unavailable:', imagenError?.message?.substring(0, 80));
+  } catch (imagenError) {
+    console.warn('Imagen 3 unavailable:', getErrorMessage(imagenError).substring(0, 80));
   }
 
   // --- Strategy 2: Use Unsplash Source API (topic-relevant photography, proxied) ---
   try {
-    // Use custom prompt keywords if provided, otherwise derive from topic/prompt
-    const searchQuery = customPrompt
-      ? extractKeywords(customPrompt)
-      : extractKeywords(prompt, topic);
+    const searchQuery = buildSearchQuery(prompt, topic, customPrompt) || 'creative,concept';
     
     // Unsplash Source API - each seed gives a different photo for the same query
     const unsplashUrl = `https://source.unsplash.com/800x800/?${encodeURIComponent(searchQuery)}&sig=${seed}`;
@@ -78,16 +106,15 @@ export async function POST(req: Request) {
     if (arrayBuffer.byteLength === 0) throw new Error('Empty image from Unsplash');
 
     const base64 = Buffer.from(arrayBuffer).toString('base64');
-    const finalQuery = customPrompt ? extractKeywords(customPrompt) : searchQuery;
-    console.log(`Unsplash image fetched for "${finalQuery}". Bytes: ${arrayBuffer.byteLength}`);
+    console.log(`Unsplash image fetched for "${searchQuery}". Bytes: ${arrayBuffer.byteLength}`);
 
     return NextResponse.json({
       imageUrl: `data:${contentType};base64,${base64}`,
       source: 'unsplash',
-      query: finalQuery
+      query: searchQuery
     });
-  } catch (unsplashError: any) {
-    console.warn('Unsplash failed:', unsplashError?.message);
+  } catch (unsplashError) {
+    console.warn('Unsplash failed:', getErrorMessage(unsplashError));
   }
 
   // --- Strategy 3: Picsum fallback (random but always works) ---
@@ -104,8 +131,8 @@ export async function POST(req: Request) {
         });
       }
     }
-  } catch (picsumError: any) {
-    console.warn('Picsum failed:', picsumError?.message);
+  } catch (picsumError) {
+    console.warn('Picsum failed:', getErrorMessage(picsumError));
   }
 
   return NextResponse.json({ error: 'All image generation strategies failed' }, { status: 500 });

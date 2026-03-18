@@ -1,23 +1,25 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { FanpageConfig } from '@/types';
 
+function loadSavedPages(): FanpageConfig[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  const saved = localStorage.getItem('fanpages');
+  return saved ? JSON.parse(saved) : [];
+}
+
 export default function Settings() {
-  const [pages, setPages] = useState<FanpageConfig[]>([]);
+  const [pages, setPages] = useState<FanpageConfig[]>(loadSavedPages);
   const [isEditing, setIsEditing] = useState<string | null>(null);
   
   // Form State
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [pageToken, setPageToken] = useState('');
-
-  useEffect(() => {
-    const saved = localStorage.getItem('fanpages');
-    if (saved) {
-      setPages(JSON.parse(saved));
-    }
-  }, []);
 
   const saveToStorage = (newPages: FanpageConfig[]) => {
     setPages(newPages);

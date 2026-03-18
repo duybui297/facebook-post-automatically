@@ -1,8 +1,97 @@
 import { NextResponse } from 'next/server';
 import { callPollinationsText } from '../../lib/pollinationsClient';
-import { ApifyClient } from 'apify-client';
 
-const apifyClient = new ApifyClient({ token: process.env.APIFY_API_TOKEN || '' });
+function stripCodeFences(value: string): string {
+  return value.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+}
+
+function maybeParseJsonString(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function sanitizePostText(value: string): string {
+  let current = stripCodeFences(value).trim();
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parsed = maybeParseJsonString(current);
+
+    if (typeof parsed === 'string') {
+      current = parsed.trim();
+      continue;
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      const postTextCandidate = (parsed as Record<string, unknown>).postText;
+      if (typeof postTextCandidate === 'string') {
+        current = postTextCandidate.trim();
+        continue;
+      }
+    }
+
+    break;
+  }
+
+  return current
+    .replace(/^<post_text>/i, '')
+    .replace(/<\/post_text>$/i, '')
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '')
+    .trim();
+}
+
+function buildFallbackImagePrompt(topic: string, postText: string): string {
+  const condensedPost = postText.replace(/\s+/g, ' ').trim().slice(0, 180);
+  return `Square Facebook cover image about ${topic}. Show the main subject and setting from this story: ${condensedPost}. Bold, realistic, eye-catching, no text overlay.`;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function extractGeneratedContent(responseText: string, topic: string) {
+  const cleanedText = stripCodeFences(responseText);
+  const tagPostMatch = cleanedText.match(/<post_text>([\s\S]*?)<\/post_text>/i);
+  const tagImageMatch = cleanedText.match(/<image_prompt>([\s\S]*?)<\/image_prompt>/i);
+
+  if (tagPostMatch?.[1]) {
+    const taggedPostText = sanitizePostText(tagPostMatch[1]);
+    const taggedImagePrompt = tagImageMatch?.[1]?.trim() || buildFallbackImagePrompt(topic, taggedPostText);
+
+    return {
+      postText: taggedPostText,
+      imagePrompt: taggedImagePrompt
+    };
+  }
+
+  const parsed = maybeParseJsonString(cleanedText);
+  if (parsed && typeof parsed === 'object') {
+    const objectValue = parsed as Record<string, unknown>;
+    const postTextCandidate = typeof objectValue.postText === 'string' ? sanitizePostText(objectValue.postText) : '';
+    const imagePromptCandidate = typeof objectValue.imagePrompt === 'string' ? objectValue.imagePrompt.trim() : '';
+
+    if (postTextCandidate) {
+      return {
+        postText: postTextCandidate,
+        imagePrompt: imagePromptCandidate || buildFallbackImagePrompt(topic, postTextCandidate)
+      };
+    }
+  }
+
+  const postMatch = cleanedText.match(/"postText"\s*:\s*"([\s\S]*?)"\s*[,}]/);
+  const imageMatch = cleanedText.match(/"imagePrompt"\s*:\s*"([\s\S]*?)"/);
+  const regexPostText = postMatch?.[1]
+    ? sanitizePostText(postMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'))
+    : sanitizePostText(cleanedText);
+
+  return {
+    postText: regexPostText,
+    imagePrompt: imageMatch?.[1]?.trim() || buildFallbackImagePrompt(topic, regexPostText)
+  };
+}
 
 export async function POST(req: Request) {
   try {
@@ -23,7 +112,7 @@ export async function POST(req: Request) {
 
     const prompt = `
     You are an expert social media manager for Facebook.
-    A user wants to create a viral Facebook post.
+    A user wants to create a viral Facebook post and a matching image brief.
     Target Fanpage URL (for context of brand voice): ${url}
     Topic: ${topic}
     Context: ${crawledDataText}
@@ -36,17 +125,15 @@ export async function POST(req: Request) {
     CRITICAL INSTRUCTIONS FOR FACEBOOK FORMATTING:
     - DO NOT use any Markdown formatting like **bold** or *italic*. Facebook does not support Markdown.
     - Output strictly plain text with emojis.
+    - The post text must be ready to paste directly into Facebook.
 
-    Additionally, write a concise "Image Prompt" (max 200 characters) for an AI image generator to create a thumbnail for this post.
-    
-    Return the result strictly as a valid JSON object.
-    CRITICAL: Output ONLY the JSON object, NO other text, NO backticks.
-    
-    Format:
-    {
-      "postText": "Your generated facebook post plain text here",
-      "imagePrompt": "Short vivid image description max 200 chars"
-    }
+    Additionally, write a concise image prompt for an AI image generator to create a square thumbnail that clearly matches the topic and the post narrative.
+    The image prompt must mention the main subject, scene, mood, and visual style.
+    The image prompt must avoid text overlays, logos, watermarks, collage layouts, or unrelated elements.
+
+    Return ONLY these exact XML-style tags, with no JSON, no commentary, and no backticks:
+    <post_text>Your generated Facebook post plain text here</post_text>
+    <image_prompt>Your matching image prompt here</image_prompt>
     `;
 
     const responseText = await callPollinationsText(prompt);
@@ -56,38 +143,14 @@ export async function POST(req: Request) {
       throw new Error('AI returned an empty or too short response. Please try again.');
     }
 
-    // Clean up markdown code fences
-    const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    
-    let generatedObject = { postText: '', imagePrompt: topic };
-    try {
-      generatedObject = JSON.parse(cleanedText);
-    } catch (e) {
-      console.warn("Failed strict JSON parse, attempting regex extraction.");
-      const postMatch = cleanedText.match(/"postText"\s*:\s*"([\s\S]*?)"\s*[,}]/);
-      const imgMatch = cleanedText.match(/"imagePrompt"\s*:\s*"([\s\S]*?)"/);
-      
-      if (postMatch?.[1]) {
-        generatedObject.postText = postMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
-      } else {
-        // Fallback: If no JSON structure, use the whole text but strip outer braces
-        generatedObject.postText = cleanedText.replace(/^{|}$/g, '').trim();
-      }
-      if (imgMatch?.[1]) generatedObject.imagePrompt = imgMatch[1];
-    }
-    
-    // Final sanity check: Ensure postText is a non-null string
+    const generatedObject = extractGeneratedContent(responseText, topic);
+
     let finalPostText = generatedObject.postText;
     if (!finalPostText || typeof finalPostText !== 'string' || finalPostText === 'null') {
-      // If still empty/null, use the cleaned whole text as a last resort
-      finalPostText = cleanedText || 'No content generated.';
+      finalPostText = sanitizePostText(responseText) || 'No content generated.';
     }
 
-    // Safety: strip any stray markdown asterisks
-    finalPostText = finalPostText.replace(/\*\*/g, '').replace(/\*/g, '');
-
-    // Trim the image prompt
-    let finalImagePrompt = (generatedObject.imagePrompt || topic);
+    let finalImagePrompt = generatedObject.imagePrompt || buildFallbackImagePrompt(topic, finalPostText);
     if (finalImagePrompt.length > 250) finalImagePrompt = finalImagePrompt.substring(0, 250);
 
     return NextResponse.json({
@@ -95,11 +158,12 @@ export async function POST(req: Request) {
       imagePrompt: finalImagePrompt
     });
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('API Generate Error:', error);
-    const isQuota = error?.message?.includes('429') || error?.message?.includes('quota');
+    const message = getErrorMessage(error);
+    const isQuota = message.includes('429') || message.toLowerCase().includes('quota') || message.toLowerCase().includes('resource exhausted');
     return NextResponse.json(
-      { error: isQuota ? 'AI quota exceeded. Please wait a few minutes and try again.' : (error?.message || 'Failed to generate content') },
+      { error: isQuota ? 'AI quota exceeded. Please wait a few minutes and try again.' : (message || 'Failed to generate content') },
       { status: 500 }
     );
   }

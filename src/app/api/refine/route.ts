@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { callPollinationsText } from '../../lib/pollinationsClient';
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 
 export async function POST(req: Request) {
@@ -60,11 +63,12 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ revisedText });
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('Refine API Error:', error);
-    const isQuota = error?.message?.includes('429') || error?.message?.includes('quota');
+    const message = getErrorMessage(error);
+    const isQuota = message.includes('429') || message.toLowerCase().includes('quota') || message.toLowerCase().includes('resource exhausted');
     return NextResponse.json(
-      { error: isQuota ? 'AI quota exceeded. Please wait a few minutes and try again.' : (error?.message || 'Failed to refine content') },
+      { error: isQuota ? 'AI quota exceeded. Please wait a few minutes and try again.' : (message || 'Failed to refine content') },
       { status: 500 }
     );
   }

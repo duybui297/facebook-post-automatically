@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export async function POST(req: Request) {
   try {
     const { text, pageToken, imageUrl } = await req.json();
@@ -71,8 +75,8 @@ export async function POST(req: Request) {
             console.warn('Photo upload to Facebook failed:', photoData?.error?.message || JSON.stringify(photoData));
           }
         }
-      } catch (imgError: any) {
-        console.warn('Image upload step failed (will publish text only):', imgError?.message);
+      } catch (imgError) {
+        console.warn('Image upload step failed (will publish text only):', getErrorMessage(imgError));
       }
     }
 
@@ -104,10 +108,10 @@ export async function POST(req: Request) {
     console.log('Published successfully. Post ID:', data.id, '| With image:', !!uploadedPhotoId);
     return NextResponse.json({ success: true, postId: data.id, withImage: !!uploadedPhotoId });
 
-  } catch (error: any) {
+  } catch (error) {
     console.error('API Publish Error:', error);
     return NextResponse.json(
-      { error: error?.message || 'Failed to publish post' },
+      { error: getErrorMessage(error) || 'Failed to publish post' },
       { status: 500 }
     );
   }
