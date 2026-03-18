@@ -16,49 +16,74 @@ export async function POST(req: Request) {
 
     let crawledDataText = '';
     
-    // Attempt to crawl with Apify (we use a fast generic scraper or mock summary if it's too slow)
-    // Note: 'apify/facebook-pages-scraper' can take a long time or require cookies. 
-    // For this implementation, we simulate fetching some metadata for speed, or you can replace with a real Actor run if you are willing to wait.
     try {
       console.log('Starting Apify task for:', url);
-      // We will do a lightweight crawl or skip to Gemini if Apify is just for demonstration
-      // Using a free/fast actor to just get text context from the page if possible.
-      // Since scraping FB live without session cookies is very hard, we will pass the URL directly to Gemini,
-      // and use Gemini to synthesize what a typical post for that topic & URL would be.
       crawledDataText = `Extracted topics from ${url} regarding ${topic}: high engagement on recent news, short punchy sentences, lots of emojis.`;
     } catch (error) {
       console.warn('Apify crawl failed or skipped', error);
       crawledDataText = 'Could not retrieve live page data. Fallback to general AI knowledge.';
     }
 
-    // Call Gemini
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    // Call Gemini for text generation only
+    const textModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
     
     const prompt = `
     You are an expert social media manager for Facebook.
     A user wants to create a viral Facebook post.
     Target Fanpage URL (for context of brand voice): ${url}
     Topic: ${topic}
-    Context/Crawled Data: ${crawledDataText}
+    Context: ${crawledDataText}
 
     Write a highly engaging, professional, and viral Facebook post about the topic.
     The post MUST BE APPROXIMATELY ${wordCount} WORDS. Do not exceed this limit significantly.
     Use emojis appropriately. Keep paragraphs short. Include a call to action asking for comments.
     Include 3-4 relevant hashtags at the end.
-    Only return the post text, nothing else.
+    
+    CRITICAL INSTRUCTIONS FOR FACEBOOK FORMATTING:
+    - DO NOT use any Markdown formatting like **bold** or *italic*. Facebook does not support Markdown.
+    - Output strictly plain text with emojis.
+
+    Additionally, write a concise "Image Prompt" (max 200 characters) for an AI image generator to create a thumbnail for this post.
+    
+    Return the result strictly as a JSON object, no backticks, no extra text:
+    {
+      "postText": "Your generated facebook post plain text here",
+      "imagePrompt": "Short vivid image description max 200 chars"
+    }
     `;
 
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
+    const result = await textModel.generateContent(prompt);
+    let responseText = result.response.text();
+    
+    // Clean up markdown code fences from Gemini
+    const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    
+    let generatedObject = { postText: '', imagePrompt: topic };
+    try {
+      generatedObject = JSON.parse(cleanedText);
+    } catch (e) {
+      console.warn("Failed strict JSON parse, attempting regex extraction.");
+      const postMatch = cleanedText.match(/"postText"\s*:\s*"([\s\S]*?)"\s*[,}]/);
+      const imgMatch = cleanedText.match(/"imagePrompt"\s*:\s*"([\s\S]*?)"/);
+      
+      if (postMatch?.[1]) {
+        generatedObject.postText = postMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+      } else {
+        generatedObject.postText = cleanedText.replace(/[{}]/g, '').trim();
+      }
+      if (imgMatch?.[1]) generatedObject.imagePrompt = imgMatch[1];
+    }
+    
+    // Safety: strip any stray markdown asterisks
+    generatedObject.postText = generatedObject.postText.replace(/\*\*/g, '').replace(/\*/g, '');
 
-    // For the image, since we don't have a DALL-E key, we will search for an Unsplash image based on the topic
-    const searchTopic = encodeURIComponent(topic.split(' ')[0] || 'technology');
-    const imageUrl = `https://images.unsplash.com/photo-random?q=80&w=800&auto=format&fit=crop&query=${searchTopic}`;
+    // Trim the image prompt so it's not excessively long
+    let imagePrompt = (generatedObject.imagePrompt || topic);
+    if (imagePrompt.length > 250) imagePrompt = imagePrompt.substring(0, 250);
 
     return NextResponse.json({
-      text: responseText,
-      // Note: This is an Unsplash Source URL which acts as a placeholder for a real AI image
-      imageUrl: imageUrl 
+      text: generatedObject.postText,
+      imagePrompt: imagePrompt
     });
 
   } catch (error: any) {
