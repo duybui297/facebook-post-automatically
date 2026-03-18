@@ -39,7 +39,10 @@ export async function POST(req: Request) {
 
     Additionally, write a concise "Image Prompt" (max 200 characters) for an AI image generator to create a thumbnail for this post.
     
-    Return the result strictly as a JSON object, no backticks, no extra text:
+    Return the result strictly as a valid JSON object.
+    CRITICAL: Output ONLY the JSON object, NO other text, NO backticks.
+    
+    Format:
     {
       "postText": "Your generated facebook post plain text here",
       "imagePrompt": "Short vivid image description max 200 chars"
@@ -47,6 +50,7 @@ export async function POST(req: Request) {
     `;
 
     const responseText = await callPollinationsText(prompt);
+    console.log('[Pollinations Response]:', responseText);
     
     // Clean up markdown code fences from Gemini
     const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
@@ -66,7 +70,11 @@ export async function POST(req: Request) {
       }
       if (imgMatch?.[1]) generatedObject.imagePrompt = imgMatch[1];
     }
-    
+    // Final sanity check: Ensure postText is a string
+    if (typeof generatedObject.postText !== 'string') {
+      generatedObject.postText = String(generatedObject.postText || '');
+    }
+
     // Safety: strip any stray markdown asterisks
     generatedObject.postText = generatedObject.postText.replace(/\*\*/g, '').replace(/\*/g, '');
 
