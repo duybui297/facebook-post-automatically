@@ -31,11 +31,14 @@ export default function Home() {
   const [images, setImages] = useState<ImageSlot[]>([]);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
-  // Refinement state
+  // Text refinement state
   const [feedback, setFeedback] = useState('');
   const [isRefining, setIsRefining] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+
+  // Per-image feedback state
+  const [imageFeedbacks, setImageFeedbacks] = useState<string[]>([]);
 
   useEffect(() => {
     const saved = localStorage.getItem('fanpages');
@@ -46,7 +49,16 @@ export default function Home() {
     }
   }, []);
 
-  const generateSingleImage = useCallback(async (prompt: string, index: number) => {
+  // Helper to update a single image feedback input
+  const setImageFeedback = (index: number, value: string) => {
+    setImageFeedbacks(prev => {
+      const updated = [...prev];
+      updated[index] = value;
+      return updated;
+    });
+  };
+
+  const generateSingleImage = useCallback(async (prompt: string, index: number, currentTopic?: string, customPrompt?: string) => {
     setImages(prev => {
       const updated = [...prev];
       updated[index] = { url: '', loading: true, error: false };
@@ -57,7 +69,7 @@ export default function Home() {
       const res = await fetch('/api/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, seed })
+        body: JSON.stringify({ prompt, topic: currentTopic || '', seed, ...(customPrompt ? { customPrompt } : {}) })
       });
       if (!res.ok) throw new Error('API call failed');
       const data = await res.json();
@@ -103,13 +115,15 @@ export default function Home() {
         timestamp: new Date().toLocaleTimeString()
       }]);
 
+      // Now generate all images in parallel
       setStep('generating_images');
       const slots: ImageSlot[] = Array.from({ length: imageCount }, () => ({ url: '', loading: true, error: false }));
       setImages(slots);
       setSelectedImageIndex(0);
+      setImageFeedbacks(Array.from({ length: imageCount }, () => ''));
 
       await Promise.all(
-        Array.from({ length: imageCount }, (_, i) => generateSingleImage(data.imagePrompt, i))
+        Array.from({ length: imageCount }, (_, i) => generateSingleImage(data.imagePrompt, i, topic))
       );
 
       setStep('review');
@@ -196,6 +210,7 @@ export default function Home() {
     setSelectedImageIndex(0);
     setHistory([]);
     setFeedback('');
+    setImageFeedbacks([]);
   };
 
   const processingStep = step === 'crawling' || step === 'generating' || step === 'generating_images' || step === 'publishing';
@@ -427,55 +442,80 @@ export default function Home() {
                 <span style={{ fontSize: '0.875rem', color: 'var(--muted)' }}>Click to select</span>
               </h3>
 
-              <div style={{ display: 'grid', gridTemplateColumns: images.length <= 1 ? '1fr' : '1fr 1fr', gap: '0.75rem', flex: 1 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: images.length <= 1 ? '1fr' : '1fr 1fr', gap: '1rem', flex: 1 }}>
                 {images.map((img, i) => (
-                  <div
-                    key={i}
-                    onClick={() => !img.loading && !img.error && setSelectedImageIndex(i)}
-                    style={{
-                      position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden',
-                      border: `2px solid ${selectedImageIndex === i ? 'var(--primary)' : 'var(--border)'}`,
-                      background: 'var(--surface)', aspectRatio: '1/1',
-                      cursor: img.loading || img.error ? 'default' : 'pointer', transition: 'border-color 0.2s',
-                      boxShadow: selectedImageIndex === i ? '0 0 12px rgba(99, 102, 241, 0.4)' : 'none'
-                    }}
-                  >
-                    {img.loading ? (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                        <div className="loader-spinner" style={{ width: '24px', height: '24px', borderTopColor: 'var(--primary)', borderRightColor: 'transparent', borderBottomColor: 'transparent', borderLeftColor: 'transparent', borderWidth: '3px' }}></div>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Generating...</span>
-                      </div>
-                    ) : img.error ? (
-                      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                        <span style={{ fontSize: '2rem' }}>⚠️</span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Generation failed</span>
-                      </div>
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={img.url} alt={`Generated ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                    )}
-
-                    {selectedImageIndex === i && !img.loading && !img.error && (
-                      <div style={{ position: 'absolute', top: '0.4rem', left: '0.4rem', background: 'var(--primary)', borderRadius: '999px', padding: '0.15rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, color: '#fff' }}>
-                        ✓ Selected
-                      </div>
-                    )}
-
-                    <button
-                      onClick={e => { e.stopPropagation(); generateSingleImage(imagePrompt, i); }}
-                      disabled={img.loading}
+                  <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {/* Image Slot */}
+                    <div
+                      onClick={() => !img.loading && !img.error && setSelectedImageIndex(i)}
                       style={{
-                        position: 'absolute', bottom: '0.4rem', right: '0.4rem',
-                        background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,255,255,0.2)',
-                        borderRadius: '999px', color: '#fff', cursor: img.loading ? 'not-allowed' : 'pointer',
-                        fontSize: '0.75rem', padding: '0.25rem 0.6rem', display: 'flex',
-                        alignItems: 'center', gap: '0.25rem', backdropFilter: 'blur(4px)',
-                        opacity: img.loading ? 0.5 : 1
+                        position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden',
+                        border: `2px solid ${selectedImageIndex === i ? 'var(--primary)' : 'var(--border)'}`,
+                        background: 'var(--surface)', aspectRatio: '1/1',
+                        cursor: img.loading || img.error ? 'default' : 'pointer', transition: 'border-color 0.2s',
+                        boxShadow: selectedImageIndex === i ? '0 0 12px rgba(99, 102, 241, 0.4)' : 'none'
                       }}
-                      title="Regenerate this image"
                     >
-                      🔄 Refresh
-                    </button>
+                      {img.loading ? (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                          <div className="loader-spinner" style={{ width: '24px', height: '24px', borderTopColor: 'var(--primary)', borderRightColor: 'transparent', borderBottomColor: 'transparent', borderLeftColor: 'transparent', borderWidth: '3px' }}></div>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Generating...</span>
+                        </div>
+                      ) : img.error ? (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                          <span style={{ fontSize: '2rem' }}>⚠️</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>Generation failed</span>
+                        </div>
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={img.url} alt={`Generated ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      )}
+
+                      {selectedImageIndex === i && !img.loading && !img.error && (
+                        <div style={{ position: 'absolute', top: '0.4rem', left: '0.4rem', background: 'var(--primary)', borderRadius: '999px', padding: '0.15rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, color: '#fff' }}>
+                          ✓ Selected
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Per-image feedback bar */}
+                    <div style={{ display: 'flex', gap: '0.4rem' }}>
+                      <input
+                        type="text"
+                        className="input-field"
+                        placeholder={`Describe image ${i + 1}...`}
+                        value={imageFeedbacks[i] || ''}
+                        onChange={e => setImageFeedback(i, e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const fb = imageFeedbacks[i] || '';
+                            generateSingleImage(imagePrompt, i, topic, fb || undefined);
+                            setImageFeedback(i, '');
+                          }
+                        }}
+                        disabled={img.loading}
+                        style={{ flex: 1, padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}
+                      />
+                      <button
+                        onClick={() => {
+                          const fb = imageFeedbacks[i] || '';
+                          generateSingleImage(imagePrompt, i, topic, fb || undefined);
+                          setImageFeedback(i, '');
+                        }}
+                        disabled={img.loading}
+                        style={{
+                          background: 'rgba(255,255,255,0.1)', border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius-md)', color: '#fff',
+                          cursor: img.loading ? 'not-allowed' : 'pointer',
+                          padding: '0.4rem 0.7rem', fontSize: '0.85rem',
+                          opacity: img.loading ? 0.5 : 1, whiteSpace: 'nowrap'
+                        }}
+                        title={imageFeedbacks[i] ? 'Regenerate with your description' : 'Refresh image'}
+                      >
+                        {imageFeedbacks[i] ? '✏️' : '🔄'}
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
