@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { FanpageConfig } from '@/types';
 
 type Step = 'idle' | 'crawling' | 'generating' | 'review' | 'publishing' | 'success';
 
@@ -10,15 +12,29 @@ interface GeneratedPost {
 }
 
 export default function Home() {
-  const [url, setUrl] = useState('');
+  const [pages, setPages] = useState<FanpageConfig[]>([]);
+  const [selectedPageId, setSelectedPageId] = useState('');
   const [topic, setTopic] = useState('');
+  const [wordCount, setWordCount] = useState<number | ''>(200);
   const [step, setStep] = useState<Step>('idle');
   
   const [post, setPost] = useState<GeneratedPost | null>(null);
 
+  useEffect(() => {
+    const saved = localStorage.getItem('fanpages');
+    if (saved) {
+      const parsedPages = JSON.parse(saved);
+      setPages(parsedPages);
+      if (parsedPages.length > 0) {
+        setSelectedPageId(parsedPages[0].id);
+      }
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!url || !topic) return;
+    const selectedPage = pages.find(p => p.id === selectedPageId);
+    if (!selectedPage || !topic) return;
     
     setStep('crawling');
     
@@ -26,7 +42,7 @@ export default function Home() {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, topic })
+        body: JSON.stringify({ url: selectedPage.url, topic, wordCount: wordCount || 200 })
       });
 
       if (!response.ok) {
@@ -51,13 +67,23 @@ export default function Home() {
 
   const handlePublish = async () => {
     if (!post) return;
+    const selectedPage = pages.find(p => p.id === selectedPageId);
+    if (!selectedPage || !selectedPage.pageToken) {
+      alert('Missing Page Access Token for this Fanpage. Please update it in Settings.');
+      return;
+    }
+    
     setStep('publishing');
     
     try {
       const response = await fetch('/api/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: post.text, imageUrl: post.imageUrl })
+        body: JSON.stringify({ 
+          text: post.text, 
+          imageUrl: post.imageUrl,
+          pageToken: selectedPage.pageToken 
+        })
       });
 
       if (!response.ok) {
@@ -76,7 +102,6 @@ export default function Home() {
   const handleReset = () => {
     setStep('idle');
     setPost(null);
-    setUrl('');
     setTopic('');
   };
 
@@ -101,20 +126,35 @@ export default function Home() {
         {step === 'idle' && (
           <div className="glass-panel animate-fade-in stagger-2" style={{ padding: '2.5rem' }}>
             <form onSubmit={handleSubmit}>
+              
               <div className="input-group">
-                <label className="input-label" htmlFor="fanpageUrl">Target Fanpage URL</label>
-                <input 
-                  id="fanpageUrl"
-                  type="url" 
-                  className="input-field" 
-                  placeholder="https://facebook.com/example"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  required
-                />
+                <label className="input-label" htmlFor="fanpage" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Target Fanpage</span>
+                  <Link href="/settings" style={{ color: 'var(--primary)', textDecoration: 'underline' }}>Manage Pages</Link>
+                </label>
+                {pages.length === 0 ? (
+                  <div style={{ padding: '1rem', background: 'rgba(255,0,0,0.1)', border: '1px solid var(--accent)', borderRadius: 'var(--radius-md)', color: 'var(--accent)', textAlign: 'center' }}>
+                    Please <Link href="/settings" style={{ textDecoration: 'underline', fontWeight: 'bold' }}>add a Fanpage</Link> in settings first.
+                  </div>
+                ) : (
+                  <select 
+                    id="fanpage"
+                    className="input-field" 
+                    value={selectedPageId}
+                    onChange={(e) => setSelectedPageId(e.target.value)}
+                    required
+                    style={{ appearance: 'none' }}
+                  >
+                    {pages.map(p => (
+                      <option key={p.id} value={p.id} style={{ color: '#000' }}>
+                        {p.name} ({p.url})
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
-              <div className="input-group" style={{ marginBottom: '2rem' }}>
+              <div className="input-group">
                 <label className="input-label" htmlFor="topic">Content Topic</label>
                 <input 
                   id="topic"
@@ -124,10 +164,32 @@ export default function Home() {
                   value={topic}
                   onChange={(e) => setTopic(e.target.value)}
                   required
+                  disabled={pages.length === 0}
                 />
               </div>
 
-              <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '1rem', fontSize: '1.125rem' }}>
+              <div className="input-group" style={{ marginBottom: '2rem' }}>
+                <label className="input-label" htmlFor="wordCount">Target Word Count (approx)</label>
+                <input 
+                  id="wordCount"
+                  type="number" 
+                  min="50"
+                  max="2000"
+                  className="input-field" 
+                  placeholder="e.g. 200"
+                  value={wordCount}
+                  onChange={(e) => setWordCount(parseInt(e.target.value) || '')}
+                  required
+                  disabled={pages.length === 0}
+                />
+              </div>
+
+              <button 
+                type="submit" 
+                className="btn btn-primary" 
+                style={{ width: '100%', padding: '1rem', fontSize: '1.125rem', opacity: pages.length === 0 ? 0.5 : 1 }}
+                disabled={pages.length === 0}
+              >
                 Start AI Engine
               </button>
             </form>

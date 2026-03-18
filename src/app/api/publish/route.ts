@@ -2,16 +2,14 @@ import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
   try {
-    const { text, /* imageUrl */ } = await req.json();
+    const { text, pageToken, /* imageUrl */ } = await req.json();
 
     if (!text) {
       return NextResponse.json({ error: 'Missing content text' }, { status: 400 });
     }
 
-    const pageAccessToken = process.env.FB_PAGE_ACCESS_TOKEN;
-    
-    if (!pageAccessToken) {
-      return NextResponse.json({ error: 'Missing FB_PAGE_ACCESS_TOKEN in env' }, { status: 500 });
+    if (!pageToken) {
+      return NextResponse.json({ error: 'Missing pageToken for the target Fanpage' }, { status: 400 });
     }
 
     // Step 1: Ideally, we should exchange the token for the specific Page ID or we assume the user provides evaluating Page ID.
@@ -22,7 +20,7 @@ export async function POST(req: Request) {
     // For this implementation, we will publish a text status update (with a link if included in text).
     const formData = new URLSearchParams();
     formData.append('message', text);
-    formData.append('access_token', pageAccessToken);
+    formData.append('access_token', pageToken);
 
     const fbResponse = await fetch(publishUrl, {
       method: 'POST',

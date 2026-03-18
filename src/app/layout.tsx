@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'AI Auto-Poster | Facebook',
@@ -18,11 +19,11 @@ export default function RootLayout({
         <nav style={{ padding: '1.5rem 0', borderBottom: '1px solid var(--border)' }}>
           <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '-0.5px' }}>
-              <span className="text-gradient">AI</span> Poster
+              <Link href="/"><span className="text-gradient">AI</span> Poster</Link>
             </div>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <a href="#" style={{ fontSize: '0.875rem', color: 'var(--muted)', fontWeight: 500 }}>Dashboard</a>
-              <a href="#" style={{ fontSize: '0.875rem', color: 'var(--muted)', fontWeight: 500 }}>Settings</a>
+            <div style={{ display: 'flex', gap: '1.5rem' }}>
+              <Link href="/" style={{ fontSize: '0.9rem', color: 'var(--foreground)', fontWeight: 500 }} className="hover:text-primary transition-colors">Dashboard</Link>
+              <Link href="/settings" style={{ fontSize: '0.9rem', color: 'var(--foreground)', fontWeight: 500 }} className="hover:text-primary transition-colors">Settings</Link>
             </div>
           </div>
         </nav>

@@ -8,7 +8,7 @@ const apifyClient = new ApifyClient({ token: process.env.APIFY_API_TOKEN || '' }
 
 export async function POST(req: Request) {
   try {
-    const { url, topic } = await req.json();
+    const { url, topic, wordCount = 200 } = await req.json();
 
     if (!url || !topic) {
       return NextResponse.json({ error: 'Missing url or topic' }, { status: 400 });
@@ -42,6 +42,7 @@ export async function POST(req: Request) {
     Context/Crawled Data: ${crawledDataText}
 
     Write a highly engaging, professional, and viral Facebook post about the topic.
+    The post MUST BE APPROXIMATELY ${wordCount} WORDS. Do not exceed this limit significantly.
     Use emojis appropriately. Keep paragraphs short. Include a call to action asking for comments.
     Include 3-4 relevant hashtags at the end.
     Only return the post text, nothing else.
