@@ -1,35 +1,8 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { callPollinationsText } from '../../lib/pollinationsClient';
 import { ApifyClient } from 'apify-client';
 
-// Initialize SDKs
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const apifyClient = new ApifyClient({ token: process.env.APIFY_API_TOKEN || '' });
-
-// Model priority list: gemini-1.5-flash has 1500 req/day free tier
-// gemini-2.0-flash as fallback (150 req/day), gemini-2.5-flash last (20/day)
-const GEMINI_MODELS = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash'];
-
-async function generateWithFallback(prompt: string): Promise<string> {
-  let lastError: any = null;
-  for (const modelName of GEMINI_MODELS) {
-    try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(prompt);
-      console.log(`[generate] Used model: ${modelName}`);
-      return result.response.text();
-    } catch (err: any) {
-      lastError = err;
-      const is429 = err?.message?.includes('429') || err?.status === 429;
-      if (is429) {
-        console.warn(`[generate] ${modelName} quota exceeded, trying next model...`);
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw lastError || new Error('All Gemini models quota exceeded. Please try again tomorrow or upgrade your plan.');
-}
 
 export async function POST(req: Request) {
   try {
@@ -73,7 +46,7 @@ export async function POST(req: Request) {
     }
     `;
 
-    const responseText = await generateWithFallback(prompt);
+    const responseText = await callPollinationsText(prompt);
     
     // Clean up markdown code fences from Gemini
     const cleanedText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();

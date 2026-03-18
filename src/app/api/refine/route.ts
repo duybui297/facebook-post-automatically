@@ -1,30 +1,7 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { callPollinationsText } from '../../lib/pollinationsClient';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-const GEMINI_MODELS = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash'];
-
-async function generateWithFallback(prompt: string): Promise<string> {
-  let lastError: any = null;
-  for (const modelName of GEMINI_MODELS) {
-    try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(prompt);
-      console.log(`[refine] Used model: ${modelName}`);
-      return result.response.text();
-    } catch (err: any) {
-      lastError = err;
-      const is429 = err?.message?.includes('429') || err?.status === 429;
-      if (is429) {
-        console.warn(`[refine] ${modelName} quota exceeded, trying next model...`);
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw lastError || new Error('All Gemini models quota exceeded.');
-}
 
 export async function POST(req: Request) {
   try {
@@ -55,7 +32,7 @@ export async function POST(req: Request) {
     - Return ONLY the revised post text, nothing else. No commentary, no preamble.
     `;
 
-    let revisedText = await generateWithFallback(prompt);
+    let revisedText = await callPollinationsText(prompt);
     revisedText = revisedText.replace(/\*\*/g, '').replace(/\*/g, '').trim();
 
     return NextResponse.json({ revisedText });
