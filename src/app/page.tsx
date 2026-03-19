@@ -10,6 +10,7 @@ interface ImageSlot {
   url: string;
   loading: boolean;
   error: boolean;
+  isUploaded: boolean; // Track if image is uploaded vs generated
 }
 
 interface HistoryEntry {
@@ -100,7 +101,7 @@ export default function Home() {
   const generateSingleImage = useCallback(async (prompt: string, index: number, currentTopic?: string, customPrompt?: string) => {
     setImages(prev => {
       const updated = [...prev];
-      updated[index] = { url: '', loading: true, error: false };
+      updated[index] = { url: '', loading: true, error: false, isUploaded: false };
       return updated;
     });
     try {
@@ -114,16 +115,42 @@ export default function Home() {
       const data = await res.json();
       setImages(prev => {
         const updated = [...prev];
-        updated[index] = { url: data.imageUrl, loading: false, error: false };
+        updated[index] = { url: data.imageUrl, loading: false, error: false, isUploaded: false };
         return updated;
       });
     } catch {
       setImages(prev => {
         const updated = [...prev];
-        updated[index] = { url: '', loading: false, error: true };
+        updated[index] = { url: '', loading: false, error: true, isUploaded: false };
         return updated;
       });
     }
+  }, []);
+
+  // Handle image upload from local
+  const handleImageUpload = useCallback((index: number, file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      setImages(prev => {
+        const updated = [...prev];
+        updated[index] = { url: result, loading: false, error: false, isUploaded: true };
+        return updated;
+      });
+    };
+    reader.onerror = () => {
+      setImages(prev => {
+        const updated = [...prev];
+        updated[index] = { url: '', loading: false, error: true, isUploaded: false };
+        return updated;
+      });
+    };
+    reader.readAsDataURL(file);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -156,7 +183,7 @@ export default function Home() {
 
       // Now generate all images in parallel
       setStep('generating_images');
-      const slots: ImageSlot[] = Array.from({ length: imageCount }, () => ({ url: '', loading: true, error: false }));
+      const slots: ImageSlot[] = Array.from({ length: imageCount }, () => ({ url: '', loading: true, error: false, isUploaded: false }));
       setImages(slots);
       setSelectedImageIndex(0);
       setImageFeedbacks(Array.from({ length: imageCount }, () => ''));
@@ -515,52 +542,136 @@ export default function Home() {
                           ✓ Selected
                         </div>
                       )}
+
+                      {/* Uploaded badge */}
+                      {img.isUploaded && !img.loading && !img.error && (
+                        <div style={{ position: 'absolute', top: '0.4rem', right: '0.4rem', background: 'rgba(16, 185, 129, 0.9)', borderRadius: '999px', padding: '0.15rem 0.5rem', fontSize: '0.7rem', fontWeight: 700, color: '#fff' }}>
+                          📁 Uploaded
+                        </div>
+                      )}
                     </div>
 
-                    {/* Per-image feedback bar */}
+                    {/* Action buttons: Upload or Regenerate */}
                     <div style={{ display: 'flex', gap: '0.4rem' }}>
+                      {/* Hidden file input */}
                       <input
-                        type="text"
-                        className="input-field"
-                        placeholder={`Describe image ${i + 1}...`}
-                        value={imageFeedbacks[i] || ''}
-                        onChange={e => setImageFeedback(i, e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            const fb = imageFeedbacks[i] || '';
-                            generateSingleImage(imagePrompt, i, topic, fb || undefined);
-                            setImageFeedback(i, '');
-                          }
+                        type="file"
+                        id={`upload-${i}`}
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleImageUpload(i, file);
+                          e.target.value = ''; // Reset input
                         }}
                         disabled={img.loading}
-                        style={{ flex: 1, padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}
                       />
+                      
+                      {/* Upload button */}
                       <button
                         onClick={() => {
-                          const fb = imageFeedbacks[i] || '';
-                          generateSingleImage(imagePrompt, i, topic, fb || undefined);
-                          setImageFeedback(i, '');
+                          const input = document.getElementById(`upload-${i}`);
+                          input?.click();
                         }}
                         disabled={img.loading}
                         style={{
-                          background: 'rgba(255,255,255,0.1)', border: '1px solid var(--border)',
-                          borderRadius: 'var(--radius-md)', color: '#fff',
+                          flex: 1,
+                          background: img.isUploaded ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.1)',
+                          border: `1px solid ${img.isUploaded ? 'rgba(16, 185, 129, 0.4)' : 'var(--border)'}`,
+                          borderRadius: 'var(--radius-md)',
+                          color: img.isUploaded ? '#10b981' : '#fff',
                           cursor: img.loading ? 'not-allowed' : 'pointer',
-                          padding: '0.4rem 0.7rem', fontSize: '0.85rem',
-                          opacity: img.loading ? 0.5 : 1, whiteSpace: 'nowrap'
+                          padding: '0.4rem 0.7rem',
+                          fontSize: '0.8rem',
+                          opacity: img.loading ? 0.5 : 1,
+                          transition: 'all 0.2s',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.35rem'
                         }}
-                        title={imageFeedbacks[i] ? 'Regenerate with your description' : 'Refresh image'}
+                        title={img.isUploaded ? 'Change uploaded image' : 'Upload image from local'}
                       >
-                        {imageFeedbacks[i] ? '✏️' : '🔄'}
+                        📁 {img.isUploaded ? 'Change' : 'Upload'}
                       </button>
+
+                      {/* Regenerate button (only show if not uploaded) */}
+                      {!img.isUploaded && (
+                        <button
+                          onClick={() => {
+                            const fb = imageFeedbacks[i] || '';
+                            generateSingleImage(imagePrompt, i, topic, fb || undefined);
+                            setImageFeedback(i, '');
+                          }}
+                          disabled={img.loading}
+                          style={{
+                            background: 'rgba(255,255,255,0.1)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 'var(--radius-md)',
+                            color: '#fff',
+                            cursor: img.loading ? 'not-allowed' : 'pointer',
+                            padding: '0.4rem 0.7rem',
+                            fontSize: '0.85rem',
+                            opacity: img.loading ? 0.5 : 1,
+                            whiteSpace: 'nowrap'
+                          }}
+                          title={imageFeedbacks[i] ? 'Regenerate with your description' : 'Refresh image'}
+                        >
+                          {imageFeedbacks[i] ? '✏️' : '🔄'}
+                        </button>
+                      )}
                     </div>
+
+                    {/* Per-image feedback bar (only show if not uploaded) */}
+                    {!img.isUploaded && (
+                      <div style={{ display: 'flex', gap: '0.4rem' }}>
+                        <input
+                          type="text"
+                          className="input-field"
+                          placeholder={`Describe image ${i + 1}...`}
+                          value={imageFeedbacks[i] || ''}
+                          onChange={e => setImageFeedback(i, e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const fb = imageFeedbacks[i] || '';
+                              generateSingleImage(imagePrompt, i, topic, fb || undefined);
+                              setImageFeedback(i, '');
+                            }
+                          }}
+                          disabled={img.loading}
+                          style={{ flex: 1, padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}
+                        />
+                        <button
+                          onClick={() => {
+                            const fb = imageFeedbacks[i] || '';
+                            generateSingleImage(imagePrompt, i, topic, fb || undefined);
+                            setImageFeedback(i, '');
+                          }}
+                          disabled={img.loading}
+                          style={{
+                            background: 'rgba(255,255,255,0.1)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 'var(--radius-md)',
+                            color: '#fff',
+                            cursor: img.loading ? 'not-allowed' : 'pointer',
+                            padding: '0.4rem 0.7rem',
+                            fontSize: '0.85rem',
+                            opacity: img.loading ? 0.5 : 1,
+                            whiteSpace: 'nowrap'
+                          }}
+                          title={imageFeedbacks[i] ? 'Regenerate with your description' : 'Refresh image'}
+                        >
+                          {imageFeedbacks[i] ? '✏️' : '🔄'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
 
               <p style={{ marginTop: '1rem', color: 'var(--muted)', fontSize: '0.8rem', textAlign: 'center' }}>
-                Powered by AI Image Gen · Select the image to publish
+                {images.some(img => img.isUploaded) ? 'Mix of uploaded and generated images · ' : 'Powered by AI Image Gen · '}Select the image to publish
               </p>
             </div>
           </div>
