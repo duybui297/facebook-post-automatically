@@ -45,12 +45,47 @@ export default function Home() {
   const [imageFeedbacks, setImageFeedbacks] = useState<string[]>([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('fanpages');
-    if (saved) {
-      const parsedPages = JSON.parse(saved);
-      setPages(parsedPages);
-      if (parsedPages.length > 0) setSelectedPageId(parsedPages[0].id);
+    async function loadPages() {
+      try {
+        // 1. Load from server (FANPAGES_DEFAULT env var persists across deploys)
+        const res = await fetch('/api/pages');
+        const data = await res.json();
+        const serverPages: FanpageConfig[] = data.pages || [];
+
+        // 2. Also load from localStorage for locally-added pages
+        let localPages: FanpageConfig[] = [];
+        try {
+          const saved = localStorage.getItem('fanpages');
+          if (saved) localPages = JSON.parse(saved);
+        } catch {}
+
+        // 3. Merge: server is base, local extras are appended
+        const merged = [...serverPages];
+        for (const local of localPages) {
+          const existsInServer = serverPages.some(s => s.id === local.id || s.url === local.url);
+          if (!existsInServer) merged.push(local);
+        }
+
+        // 4. Persist merged list back to localStorage
+        localStorage.setItem('fanpages', JSON.stringify(merged));
+
+        if (merged.length > 0) {
+          setPages(merged);
+          setSelectedPageId(merged[0].id);
+        }
+      } catch {
+        // Fallback to localStorage only
+        try {
+          const saved = localStorage.getItem('fanpages');
+          if (saved) {
+            const parsedPages = JSON.parse(saved);
+            setPages(parsedPages);
+            if (parsedPages.length > 0) setSelectedPageId(parsedPages[0].id);
+          }
+        } catch {}
+      }
     }
+    loadPages();
   }, []);
 
   // Helper to update a single image feedback input
